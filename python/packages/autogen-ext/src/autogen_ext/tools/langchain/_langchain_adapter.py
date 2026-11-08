@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, Type, cast
 
 from autogen_core import CancellationToken
 from autogen_core.tools import BaseTool
+from langchain_core.tools.base import FILTERED_ARGS, _get_runnable_config_param
 from pydantic import BaseModel, ConfigDict, Field, create_model
 
 if TYPE_CHECKING:
@@ -166,9 +167,14 @@ class LangChainToolAdapter(BaseTool[BaseModel, Any]):
         else:
             # Infer args_type from the callable's signature
             sig = inspect.signature(cast(Callable[..., Any], self._callable))  # type: ignore
-            # Exclude LangChain framework-injected parameters that are not
-            # user-supplied arguments (e.g. run_manager, config, callbacks).
-            _skip_names = {"run_manager", "config", "callbacks", "tags", "metadata"}
+            # Match LangChain's schema filtering: only framework-injected _run args
+            # (run_manager, callbacks) and RunnableConfig injection parameters.
+            _skip_names = set(FILTERED_ARGS)
+            config_param = _get_runnable_config_param(
+                cast(Callable[..., Any], self._callable)
+            )
+            if config_param is not None:
+                _skip_names.add(config_param)
             fields = {
                 k: (v.annotation, Field(...))
                 for k, v in sig.parameters.items()

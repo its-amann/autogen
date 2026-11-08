@@ -1,14 +1,15 @@
 import logging
-from typing import Optional, Type, cast
+from typing import Any, Optional, Type, cast
 
 import pytest
 from autogen_core import CancellationToken
 from autogen_core.tools import Tool
-from autogen_ext.tools.langchain import LangChainToolAdapter  # type: ignore
 from langchain_core.callbacks.manager import AsyncCallbackManagerForToolRun, CallbackManagerForToolRun
 from langchain_core.tools import BaseTool as LangChainTool
 from langchain_core.tools import tool  # pyright: ignore
 from pydantic import BaseModel, Field
+
+from autogen_ext.tools.langchain import LangChainToolAdapter  # type: ignore
 
 
 @tool  # type: ignore
@@ -162,3 +163,44 @@ async def test_langchain_tool_adapter_without_args_schema_run() -> None:
 
     result = await adapter.run_json({"a": 6, "b": 7}, CancellationToken())
     assert result == 42
+
+
+class ToolWithTagsAndMetadataParams(LangChainTool):
+    """Schema-less tool whose ``_run`` takes user ``tags`` / ``metadata`` arguments.
+
+    These names match LangChain ``BaseTool`` model fields but are legitimate tool
+    inputs here and must appear in the inferred JSON schema.
+    """
+
+    name: str = "tag_meta_tool"
+    description: str = "echo tags and metadata"
+    args_schema: Optional[Type[BaseModel]] = None  # type: ignore
+    return_direct: bool = True
+
+    def _run(
+        self,
+        query: str,
+        tags: list[str],
+        metadata: dict[str, Any],
+        run_manager: Optional[CallbackManagerForToolRun] = None,
+    ) -> str:
+        return f"{query}:{','.join(tags)}:{metadata.get('k')}"
+
+
+@pytest.mark.asyncio
+async def test_langchain_tool_adapter_preserves_tags_and_metadata_params() -> None:
+    """User-supplied ``tags`` / ``metadata`` _run parameters must not be stripped."""
+    tool_instance = ToolWithTagsAndMetadataParams()
+    adapter = LangChainToolAdapter(tool_instance)  # type: ignore
+
+    properties = adapter.schema["parameters"]["properties"]
+    assert "tags" in properties
+    assert "metadata" in properties
+    assert "run_manager" not in properties
+    assert set(adapter.schema["parameters"]["required"]) == {"query", "tags", "metadata"}
+
+    result = await adapter.run_json(
+        {"query": "hi", "tags": ["a", "b"], "metadata": {"k": "v"}},
+        CancellationToken(),
+    )
+    assert result == "hi:a,b:v"
