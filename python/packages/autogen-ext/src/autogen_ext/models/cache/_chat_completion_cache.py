@@ -201,13 +201,16 @@ class ChatCompletionCache(ChatCompletionClient, Component[ChatCompletionCacheCon
         else:
             tool_choice_data = tool_choice
 
-        data = {
+        data: dict[str, Any] = {
             "messages": [message.model_dump() for message in messages],
             "tools": [(tool.schema if isinstance(tool, Tool) else tool) for tool in tools],
             "json_output": json_output_data,
-            "tool_choice": tool_choice_data,
             "extra_create_args": extra_create_args,
         }
+        # Keep the default out of the key, so entries already cached in a
+        # disk or redis store (all created with "auto") still hit after upgrade.
+        if tool_choice_data != "auto":
+            data["tool_choice"] = tool_choice_data
         serialized_data = json.dumps(data, sort_keys=True)
         cache_key = hashlib.sha256(serialized_data.encode()).hexdigest()
 

@@ -979,3 +979,28 @@ async def test_cache_distinguishes_tool_choice() -> None:
     response0_cached = await cached_client.create(messages, tool_choice="auto")
     assert response0_cached.cached
     assert response0_cached.content == responses[0]
+
+
+def test_check_cache_default_tool_choice_keeps_existing_keys() -> None:
+    import hashlib
+
+    _, prompts, system_prompt, _, cached_client = get_test_data()
+    messages = [system_prompt, UserMessage(content=prompts[0], source="user")]
+
+    # Key layout used before tool_choice took part in it: entries already in a
+    # persistent store must still be found for calls with the default "auto".
+    legacy_data = {
+        "messages": [message.model_dump() for message in messages],
+        "tools": [],
+        "json_output": None,
+        "extra_create_args": {},
+    }
+    legacy_key = hashlib.sha256(json.dumps(legacy_data, sort_keys=True).encode()).hexdigest()
+
+    _, default_key = cached_client._check_cache(messages, [], None, {})  # type: ignore
+    _, auto_key = cached_client._check_cache(messages, [], None, {}, "auto")  # type: ignore
+    _, none_key = cached_client._check_cache(messages, [], None, {}, "none")  # type: ignore
+
+    assert default_key == legacy_key
+    assert auto_key == legacy_key
+    assert none_key != legacy_key
